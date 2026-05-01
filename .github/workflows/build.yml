@@ -1,0 +1,116 @@
+name: Build Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.os-name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14         # Apple Silicon (arm64)
+            os-name: macos-arm64
+            artifact: DzenKonkurenty-mac-arm64.dmg
+          - os: macos-13         # Intel
+            os-name: macos-intel
+            artifact: DzenKonkurenty-mac-intel.dmg
+          - os: windows-latest
+            os-name: windows-x64
+            artifact: DzenKonkurenty-win-x64.zip
+          - os: ubuntu-latest
+            os-name: linux-x64
+            artifact: DzenKonkurenty-linux-x64.tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install Playwright Chromium
+        run: |
+          python -m playwright install chromium --with-deps
+
+      - name: Build with PyInstaller
+        env:
+          PYTHONOPTIMIZE: 1
+        run: python -m PyInstaller build/dzen.spec --clean --noconfirm
+
+      # ---------- macOS: создаём .dmg ----------
+      - name: Package macOS .dmg
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          # Положим Playwright-кеш с Chromium внутрь .app
+          PW_CACHE=~/Library/Caches/ms-playwright
+          if [ -d "$PW_CACHE" ]; then
+            mkdir -p "dist/DzenKonkurenty.app/Contents/Resources/playwright-browsers"
+            cp -R "$PW_CACHE/." "dist/DzenKonkurenty.app/Contents/Resources/playwright-browsers/"
+          fi
+          # Делаем .dmg
+          brew install create-dmg || true
+          create-dmg \
+            --volname "Дзен Конкуренты" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "DzenKonkurenty.app" 175 190 \
+            --app-drop-link 425 190 \
+            "dist/${{ matrix.artifact }}" \
+            "dist/DzenKonkurenty.app" || \
+          hdiutil create -volname "Дзен Конкуренты" -srcfolder "dist/DzenKonkurenty.app" -ov -format UDZO "dist/${{ matrix.artifact }}"
+
+      # ---------- Windows: zip ----------
+      - name: Package Windows zip
+        if: matrix.os == 'windows-latest'
+        run: |
+          # Положим Playwright-кеш в папку приложения
+          $PW = "$env:USERPROFILE\AppData\Local\ms-playwright"
+          if (Test-Path $PW) {
+            Copy-Item -Recurse -Force "$PW" "dist/DzenKonkurenty/playwright-browsers"
+          }
+          Compress-Archive -Path "dist/DzenKonkurenty/*" -DestinationPath "dist/${{ matrix.artifact }}"
+
+      # ---------- Linux: tar.gz ----------
+      - name: Package Linux tar.gz
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          PW="$HOME/.cache/ms-playwright"
+          if [ -d "$PW" ]; then
+            cp -R "$PW" dist/DzenKonkurenty/playwright-browsers
+          fi
+          cd dist && tar czf "${{ matrix.artifact }}" DzenKonkurenty/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os-name }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true

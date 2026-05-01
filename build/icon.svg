@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#0d1822"/>
+      <stop offset="60%" stop-color="#06090d"/>
+      <stop offset="100%" stop-color="#020305"/>
+    </radialGradient>
+    <linearGradient id="diamond" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A5F3ED"/>
+      <stop offset="50%" stop-color="#1AD8C8"/>
+      <stop offset="100%" stop-color="#0E8B7F"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1AD8C8" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#1AD8C8" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="8" stdDeviation="20" flood-color="#1AD8C8" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="220" fill="url(#bg)"/>
+
+  <!-- Soft cyan glow behind diamond -->
+  <circle cx="512" cy="512" r="380" fill="url(#glow)"/>
+
+  <!-- Main diamond -->
+  <g transform="translate(512 512) rotate(45)" filter="url(#shadow)">
+    <rect x="-260" y="-260" width="520" height="520" rx="40" fill="url(#diamond)"/>
+    <!-- Inner highlight -->
+    <rect x="-260" y="-260" width="520" height="520" rx="40"
+          fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="3"/>
+  </g>
+
+  <!-- Tiny accent dots -->
+  <circle cx="180" cy="180" r="6" fill="#1AD8C8" opacity="0.7"/>
+  <circle cx="844" cy="180" r="6" fill="#1AD8C8" opacity="0.5"/>
+  <circle cx="180" cy="844" r="6" fill="#1AD8C8" opacity="0.5"/>
+  <circle cx="844" cy="844" r="6" fill="#1AD8C8" opacity="0.7"/>
+</svg>

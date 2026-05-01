@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.Python
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# App data — у каждого пользователя своё, не пушим
+data/
+logs/
+sessions/
+web/sessions/
+web/logs/
+
+# Build artefacts
+build/icon.iconset/
+dist/
+*.spec.bak
+
+# Локальные .env (могут содержать ключи)
+.env
+.env.local
+*storage_state*.json
+
+# Тестовые/debug-файлы
+_probe.py
+_test_*.py
+_research*.py
+_rerank.py
+_debug_*.py
+
+# CSV/SQLite результаты прогонов
+*.sqlite
+*.sqlite-journal
+report_*.csv
+каналы_*.csv
+статьи_*.csv

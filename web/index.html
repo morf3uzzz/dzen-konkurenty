@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ДЗЕН · АНАЛИЗ КОНКУРЕНТОВ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="bg-blobs">
+  <div class="bg-blob b1"></div>
+  <div class="bg-blob b2"></div>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark"></span>
+    <span class="brand-name">Дзен · <b>конкуренты</b></span>
+  </div>
+  <div class="topbar-pills">
+    <span class="eye-pill hidden" id="ai-cost-pill">
+      <span class="dot"></span>
+      <span id="ai-cost-text">AI · $0.0000</span>
+    </span>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- ============== Левая колонка ============== -->
+  <div class="col col-left">
+
+    <!-- Card: Настройки -->
+    <section class="card card-conic">
+      <div class="card-head">
+        <div class="eyebrow">Настройка прогона</div>
+        <h2>Запусти анализ</h2>
+        <span class="card-sub">AI расширит нишу, скрипт соберёт каналы из трёх источников и оценит каждый на релевантность</span>
+      </div>
+
+      <label class="field">
+        <span class="label">OpenRouter API ключ</span>
+        <div class="input-group">
+          <input id="api_key" type="password" placeholder="sk-or-v1-..." autocomplete="off" spellcheck="false">
+          <button id="load_models" class="btn-icon-only" type="button" title="Подгрузить модели">↻</button>
+        </div>
+        <span class="hint">Не сохраняется на сервере. Получить: <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a></span>
+      </label>
+
+      <label class="field">
+        <span class="label">Модель Claude</span>
+        <div class="select-wrap">
+          <select id="model" disabled>
+            <option value="">Сначала введи ключ</option>
+          </select>
+        </div>
+        <span class="hint" id="model_hint">Цены отображаются за миллион токенов.</span>
+      </label>
+
+      <label class="field">
+        <span class="label">Ниша</span>
+        <input id="niche" type="text" placeholder="недвижимость" autocomplete="off">
+      </label>
+
+      <label class="field">
+        <span class="label">Описание ниши <span class="muted">— что ищем, что отсеиваем</span></span>
+        <textarea id="description" rows="5" placeholder="Опиши: для кого контент, какие подтемы интересны и какие — нет.&#10;&#10;Пример: Рынок недвижимости в России для инвесторов и риэлторов. Интересны каналы про сделки, ипотеку, аналитику рынка. Не интересны дизайн интерьеров, ремонт и личные истории мам в декрете."></textarea>
+        <span class="hint">Чем подробнее — тем точнее AI отсеет нерелевантные каналы.</span>
+      </label>
+
+      <label class="field field-narrow">
+        <span class="label">Минимум подписчиков</span>
+        <input id="min_subs" type="number" min="0" value="1000" autocomplete="off">
+        <span class="hint">Меньшие — не идут в детальный анализ и в финальный CSV.</span>
+      </label>
+
+      <div class="actions">
+        <button id="start" class="btn btn-primary">Запустить</button>
+        <button id="stop" class="btn btn-danger" disabled>Остановить</button>
+        <span class="status-pill" id="status">
+          <span class="status-dot"></span>
+          <span class="status-text">Ожидание</span>
+        </span>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ============== Правая колонка ============== -->
+  <div class="col col-right">
+
+    <!-- Card: История -->
+    <section class="card">
+      <div class="card-head">
+        <div class="eyebrow">Только твоё</div>
+        <h2>История</h2>
+        <span class="card-sub">Файлы видны только тебе. Удаляются с сервера через 24 часа.</span>
+      </div>
+      <div id="reports" class="reports">
+        <div class="empty">пока нет прогонов</div>
+      </div>
+    </section>
+
+    <!-- Card: Как работает -->
+    <section class="card">
+      <div class="card-head">
+        <div class="eyebrow">Под капотом</div>
+        <h2>6 стадий</h2>
+      </div>
+      <ol class="steps">
+        <li>AI расширяет нишу в десятки тематических запросов</li>
+        <li>Скрипт идёт в Дзен через два вида поиска</li>
+        <li>Дополняет сеть похожими каналами</li>
+        <li>Отсеивает мелочь по фильтру подписчиков</li>
+        <li>Тянет статьи и метрики через JSON-API</li>
+        <li>AI оценивает каждый канал на релевантность</li>
+      </ol>
+    </section>
+
+  </div>
+</main>
+
+<!-- Прогресс + лог: полная ширина -->
+<section class="full-width">
+  <div class="card">
+    <div class="card-head">
+      <div class="eyebrow">Что происходит</div>
+      <h2>Прогресс</h2>
+      <span class="card-sub" id="elapsed">—</span>
+    </div>
+
+    <div class="progress-wrap" id="progress">
+      <div class="progress-stage" data-stage="1"><span class="progress-label">Расширение</span></div>
+      <div class="progress-stage" data-stage="2"><span class="progress-label">Сбор каналов</span></div>
+      <div class="progress-stage" data-stage="3"><span class="progress-label">Похожие</span></div>
+      <div class="progress-stage" data-stage="4"><span class="progress-label">Отсев</span></div>
+      <div class="progress-stage" data-stage="5"><span class="progress-label">Метрики</span></div>
+      <div class="progress-stage" data-stage="6"><span class="progress-label">AI оценка</span></div>
+    </div>
+
+    <div class="log-wrap">
+      <pre id="log" class="log">Ожидание запуска…</pre>
+    </div>
+  </div>
+</section>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
