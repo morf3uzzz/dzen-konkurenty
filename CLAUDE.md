@@ -100,7 +100,7 @@ is locked`.
 
 ### 3. Канонизация URL статей
 
-`parsing_utils.canonical_article_url` отрезает query-параметры (`rid`, `_csrf`,
+`api.py::_canonical_article_url` отрезает query-параметры (`rid`, `_csrf`,
 `referrer_clid`). Без этого одна статья выглядит как 5 разных URL и ломает дедуп.
 
 ### 4. Только `type=article` в `api.py::fetch_channel_feed`
@@ -184,6 +184,39 @@ git push origin v1.0.0
 ```
 
 GitHub Actions сама соберёт и положит файлы в Releases.
+
+### Логика выбора «локально vs Actions» (правило)
+
+**По умолчанию все 4 сборки идут через GitHub Actions** (`.github/workflows/build.yml`,
+матрица: `macos-14` arm64 + `macos-13` intel + `windows-latest` + `ubuntu-latest`).
+Это правильный путь — нативные runner'ы, чистое окружение, без Rosetta-фокусов.
+
+**Локально имеет смысл собирать только под архитектуру текущей машины:**
+- Apple Silicon (`uname -m` → `arm64`) → локально только arm64 .app.
+- Intel Mac → локально только Intel .app.
+- Windows / Linux — аналогично.
+
+**Кросс-сборка под чужую архитектуру локально — плохая идея.** Например, на arm64
+Mac собрать Intel .app можно через `arch -x86_64` + Rosetta + Intel-Python +
+universal2/x86_64 wheel'ы (особенно Playwright). Это шатко: half wheel'ов нет в
+x86_64, идёт компиляция из исходников, Chromium качается отдельно. Если уж очень
+надо — пользователь явно попросил, и тогда:
+1. Установить Intel-Python: `arch -x86_64 /usr/bin/env brew install python@3.12`
+   или скачать с python.org x86_64 installer.
+2. Создать отдельный `.venv-intel` с этим Python.
+3. `arch -x86_64 .venv-intel/bin/python -m pip install -r requirements.txt`.
+4. `arch -x86_64 .venv-intel/bin/python -m playwright install chromium`.
+5. `arch -x86_64 .venv-intel/bin/python -m PyInstaller build/dzen.spec`.
+
+Гораздо проще запушить тег и подождать 15-20 минут — Actions выдаст все 4 артефакта
+и автоматически создаст релиз.
+
+**Если пользователь просит «собрать одну платформу локально, а остальное через CI»** —
+делать это надо так: собрать локально, **отдельно** загрузить артефакт в существующий
+GitHub Release (`gh release upload v1.0.0 path/to/file.dmg`), параллельно запустить
+Actions для остальных платформ через тот же тег. Не убирать платформу из матрицы
+workflow — Actions всё равно соберёт, и это не помешает (или, если хочется
+сэкономить минуты CI, использовать `workflow_dispatch` и явно выбрать платформы).
 
 ---
 
