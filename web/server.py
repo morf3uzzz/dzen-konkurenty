@@ -30,19 +30,28 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 
-def _resolve_root() -> Path:
-    """В упакованном приложении (PyInstaller) данные лежат рядом с .app/.exe.
-    В режиме разработки — в корне проекта."""
+def _resolve_paths():
+    """Возвращает (CODE_ROOT, USER_ROOT).
+    CODE_ROOT — где лежат dzen_competitors/web/ и т.п. (read-only, внутри бандла).
+    USER_ROOT — куда писать data/ и logs/ (рядом с .app/.exe, доступно пользователю).
+    В dev оба совпадают — корень проекта."""
     if getattr(sys, "frozen", False):
-        # PyInstaller bundle
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent.parent
+        exec_dir = Path(sys.executable).resolve().parent
+        # macOS .app: код в Contents/Resources/, data/logs рядом с .app снаружи
+        if sys.platform == "darwin" and exec_dir.name == "MacOS" and exec_dir.parent.name == "Contents":
+            code_root = exec_dir.parent / "Resources"
+            user_root = exec_dir.parent.parent.parent  # рядом с .app
+            return code_root, user_root
+        # Win/Linux: всё рядом с launcher'ом
+        return exec_dir, exec_dir
+    proj = Path(__file__).resolve().parent.parent
+    return proj, proj
 
 
-ROOT = _resolve_root()
-COMPETITORS_DIR = ROOT / "dzen_competitors"
-DATA_DIR = ROOT / "data"
-LOGS_DIR = ROOT / "logs"
+CODE_ROOT, USER_ROOT = _resolve_paths()
+COMPETITORS_DIR = CODE_ROOT / "dzen_competitors"
+DATA_DIR = USER_ROOT / "data"
+LOGS_DIR = USER_ROOT / "logs"
 WEB_DIR = Path(__file__).resolve().parent
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,7 +63,7 @@ def _python_interp() -> str:
     if getattr(sys, "frozen", False):
         # В упакованном приложении вызываем сам себя в режиме CLI
         return sys.executable
-    venv = ROOT / ".venv" / "bin" / "python"
+    venv = CODE_ROOT / ".venv" / "bin" / "python"
     return str(venv) if venv.exists() else sys.executable
 
 
@@ -133,7 +142,7 @@ async def start(req: Request):
         try:
             proc = subprocess.Popen(
                 cmd,
-                cwd=COMPETITORS_DIR if not getattr(sys, "frozen", False) else ROOT,
+                cwd=COMPETITORS_DIR if not getattr(sys, "frozen", False) else CODE_ROOT,
                 stdout=log_fh, stderr=subprocess.STDOUT,
                 env=env, start_new_session=True,
             )
