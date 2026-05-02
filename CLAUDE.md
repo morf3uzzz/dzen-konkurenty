@@ -334,6 +334,12 @@ file "dist/DzenKonkurenty.app/Contents/Resources/playwright-browsers/chromium-12
   всё равно загружаются. Не перетаскивать `_csrf` руками.
 - **Локальный `.env` в `dzen_competitors/`** перебивает env-переменные родителя.
   Поэтому `load_dotenv(..., override=False)` — env родителя приоритетнее.
+- **`create-dmg` в CI выдаёт битый DMG.** Из-за warning'а «hdiutil does not
+  support internet-enable» он успешно завершается, но кладёт UDRW-образ без
+  файловой системы (`partition-scheme: none`). Пользователь видит «Подключенный
+  диск нельзя прочитать на этом компьютере». Использовать только нативный
+  `hdiutil create -format UDZO` + `hdiutil verify`. Так баг был словлен в
+  arm64-артефакте v1.0.1; пересобрано локально и заменено.
 
 ---
 

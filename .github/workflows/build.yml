@@ -51,27 +51,25 @@ jobs:
         run: python -m PyInstaller build/dzen.spec --clean --noconfirm
 
       # ---------- macOS: создаём .dmg ----------
+      # ВАЖНО: используем нативный hdiutil, а не create-dmg.
+      # create-dmg в CI иногда падает с warning'ом «hdiutil does not support
+      # internet-enable» и выдаёт битый UDRW-образ без файловой системы
+      # (partition-scheme: none). Симптом у пользователя: «Подключенный диск
+      # нельзя прочитать на этом компьютере». hdiutil UDZO всегда валидный.
       - name: Package macOS .dmg
         if: startsWith(matrix.os, 'macos')
         run: |
-          # Положим Playwright-кеш с Chromium внутрь .app
           PW_CACHE=~/Library/Caches/ms-playwright
           if [ -d "$PW_CACHE" ]; then
             mkdir -p "dist/DzenKonkurenty.app/Contents/Resources/playwright-browsers"
             cp -R "$PW_CACHE/." "dist/DzenKonkurenty.app/Contents/Resources/playwright-browsers/"
           fi
-          # Делаем .dmg
-          brew install create-dmg || true
-          create-dmg \
-            --volname "Дзен Конкуренты" \
-            --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --icon "DzenKonkurenty.app" 175 190 \
-            --app-drop-link 425 190 \
-            "dist/${{ matrix.artifact }}" \
-            "dist/DzenKonkurenty.app" || \
-          hdiutil create -volname "Дзен Конкуренты" -srcfolder "dist/DzenKonkurenty.app" -ov -format UDZO "dist/${{ matrix.artifact }}"
+          hdiutil create -volname "Дзен Конкуренты" \
+            -srcfolder "dist/DzenKonkurenty.app" \
+            -ov -format UDZO \
+            "dist/${{ matrix.artifact }}"
+          # Sanity check: образ должен монтироваться. Если нет — падаем.
+          hdiutil verify "dist/${{ matrix.artifact }}"
 
       # ---------- Windows: zip ----------
       - name: Package Windows zip
