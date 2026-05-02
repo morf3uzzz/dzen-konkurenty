@@ -42,8 +42,11 @@ HIDDEN = [
     "fastapi", "starlette", "anyio",
     "httpx", "h11", "httpcore",
     "yaml", "dotenv",
-    "pystray", "PIL",
+    "PIL",
     "playwright.async_api",
+    "webview", "webview.platforms.cocoa",
+    "webview.platforms.winforms", "webview.platforms.edgechromium",
+    "webview.platforms.gtk",
 ]
 
 

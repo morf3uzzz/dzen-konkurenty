@@ -5,6 +5,11 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 httpx>=0.27.0
 Pillow>=10.0.0
+pywebview>=5.0
+# pywebview на Linux требует GTK Webkit — ставится отдельно через apt:
+#   sudo apt install python3-gi gir1.2-webkit-4.1 (Debian/Ubuntu)
+# На macOS использует встроенный Cocoa WKWebView (ничего не надо).
+# На Windows использует Edge WebView2 (есть в Win10/11 по умолчанию).
 
 # Сборка десктопного приложения:
 # pip install pyinstaller

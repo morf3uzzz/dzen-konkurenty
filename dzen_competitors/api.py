@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -91,14 +92,21 @@ class DzenAPI:
             self._client = None
 
     async def _get_json(self, url: str, *, retries: int = 3) -> Optional[dict]:
-        assert self._client is not None
+        if self._client is None:
+            raise RuntimeError("DzenAPI используется вне `async with` — клиент не создан.")
         last_err: Optional[Exception] = None
         async with self._semaphore:
             for attempt in range(retries):
                 try:
                     r = await self._client.get(url)
                     if r.status_code == 200:
-                        return r.json()
+                        try:
+                            return r.json()
+                        except (ValueError, json.JSONDecodeError) as e:
+                            # cf-challenge или капча возвращают HTML с 200 OK
+                            logger.warning("API non-JSON: %s (%s)", url[:80], e)
+                            await asyncio.sleep(2 ** attempt)
+                            continue
                     if r.status_code in (429, 500, 502, 503, 504):
                         wait = 2 ** attempt
                         logger.warning("API %d: %s, ждём %ds", r.status_code, url[:80], wait)
@@ -172,18 +180,3 @@ class DzenAPI:
             url = next_link
 
         return ChannelFeedResult(all_articles, url, publisher_subs)
-
-    # ---------- recommend похожих каналов ----------
-
-    async def fetch_similar_channels(self, slug: str) -> list[dict]:
-        """Возвращает список похожих/рекомендуемых каналов.
-        Эндпоинт `recommend-topic-channels-heads` отдаёт похожие каналы темы.
-        """
-        url = (
-            f"https://dzen.ru/api/web/v1/recommend-topic-channels-heads"
-            f"?clid=1400&channel_name={quote(slug, safe='/')}"
-        )
-        data = await self._get_json(url)
-        if not data:
-            return []
-        return data.get("topicChannelHeads") or []

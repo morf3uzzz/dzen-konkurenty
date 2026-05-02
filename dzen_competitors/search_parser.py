@@ -62,6 +62,20 @@ JS_ARTICLE_CHANNELS = r"""
 """
 
 
+async def _detect_captcha(page) -> bool:
+    """Возвращает True, если страница похожа на показ капчи Дзена/Яндекса."""
+    try:
+        title = (await page.title() or "").lower()
+        url = page.url.lower()
+        if "captcha" in url or "showcaptcha" in url or "smartcaptcha" in url:
+            return True
+        if "captcha" in title or "подтвердите" in title:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 async def search_channels_publisher(
     ctx: BrowserContext, query: str, cfg: Config,
 ) -> list[ChannelHit]:
@@ -73,6 +87,9 @@ async def search_channels_publisher(
         logger.info("[поиск-каналы] %s", query)
         await page.goto(url, wait_until="domcontentloaded")
         await polite_sleep(cfg.min_delay, cfg.max_delay)
+        if await _detect_captcha(page):
+            logger.warning("[поиск-каналы] '%s': КАПЧА — Дзен заблокировал. Сделай паузу или используй прокси.", query)
+            return hits
         try:
             await page.wait_for_selector(PUBLISHER_CARD, timeout=12000)
         except Exception:
@@ -123,6 +140,9 @@ async def search_channels_from_articles(
         logger.info("[поиск-статьи] %s", query)
         await page.goto(url, wait_until="domcontentloaded")
         await polite_sleep(cfg.min_delay, cfg.max_delay)
+        if await _detect_captcha(page):
+            logger.warning("[поиск-статьи] '%s': КАПЧА", query)
+            return hits
         try:
             await page.wait_for_selector(ARTICLE_CARD, timeout=12000)
         except Exception:

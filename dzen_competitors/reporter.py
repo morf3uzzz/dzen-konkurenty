@@ -86,8 +86,21 @@ def write_channels_csv(
             + (rel / 10) * 2.0
         )
 
-        # Топ-3 заголовка по просмотрам
+        # Топ-3 статей по просмотрам
         top_arts = sorted(arts, key=lambda a: -(a["views"] or 0))[:3]
+
+        def _top_field(idx: int, key: str):
+            return top_arts[idx][key] if len(top_arts) > idx else None
+
+        def _top_ttr(idx: int):
+            if len(top_arts) <= idx:
+                return None
+            a = top_arts[idx]
+            v = a["views"] or 0
+            t = a["views_till_end"] or 0
+            if not v:
+                return None
+            return min(t, v) / v
 
         rows.append({
             "slug": slug,
@@ -106,9 +119,18 @@ def write_channels_csv(
             "max_views": max(views) if views else None,
             "read_through_rate": read_through,
             "score": round(score, 3),
-            "top1": top_arts[0]["title"] if len(top_arts) > 0 else "",
-            "top2": top_arts[1]["title"] if len(top_arts) > 1 else "",
-            "top3": top_arts[2]["title"] if len(top_arts) > 2 else "",
+            "top1_title": _top_field(0, "title") or "",
+            "top1_url": _top_field(0, "url") or "",
+            "top1_views": _top_field(0, "views"),
+            "top1_ttr": _top_ttr(0),
+            "top2_title": _top_field(1, "title") or "",
+            "top2_url": _top_field(1, "url") or "",
+            "top2_views": _top_field(1, "views"),
+            "top2_ttr": _top_ttr(1),
+            "top3_title": _top_field(2, "title") or "",
+            "top3_url": _top_field(2, "url") or "",
+            "top3_views": _top_field(2, "views"),
+            "top3_ttr": _top_ttr(2),
         })
 
     rows.sort(key=lambda r: (-(r["relevance"] or 0), -r["score"]))
@@ -120,12 +142,20 @@ def write_channels_csv(
             "Ранг", "Релевантность 0-10", "Категория", "Причина",
             "Канал (slug)", "Название канала", "Ссылка на канал", "Описание",
             "Подписчики", "Скор",
-            "Попаданий в нишу", "Статей всего", "Статей за 30 дней",
+            "Попаданий в нишу", "Собрано статей", "Статей за 30 дней",
             "Постов/неделю за 30 дней",
             "Медиана просмотров", "Макс просмотров",
-            "Дочитываемость (доля)",
-            "Топ-1 статья", "Топ-2 статья", "Топ-3 статья",
+            "Дочитываемость, %",
+            "Топ-1 заголовок", "Топ-1 просмотры", "Топ-1 дочитываемость, %", "Топ-1 ссылка",
+            "Топ-2 заголовок", "Топ-2 просмотры", "Топ-2 дочитываемость, %", "Топ-2 ссылка",
+            "Топ-3 заголовок", "Топ-3 просмотры", "Топ-3 дочитываемость, %", "Топ-3 ссылка",
         ])
+
+        def _ttr_pct(v):
+            if v is None:
+                return ""
+            return f"{round(v * 100, 1)}%"
+
         for i, r in enumerate(rows, 1):
             w.writerow([
                 i, r["relevance"] if r["relevance"] is not None else "",
@@ -135,8 +165,10 @@ def write_channels_csv(
                 r["niche_hits"], r["articles_total"], r["articles_30d"],
                 round(r["posts_per_week_30d"], 2) if r["posts_per_week_30d"] is not None else "",
                 r["median_views"] or "", r["max_views"] or "",
-                round(r["read_through_rate"], 3) if r["read_through_rate"] is not None else "",
-                r["top1"], r["top2"], r["top3"],
+                _ttr_pct(r["read_through_rate"]),
+                r["top1_title"], r["top1_views"] or "", _ttr_pct(r["top1_ttr"]), r["top1_url"],
+                r["top2_title"], r["top2_views"] or "", _ttr_pct(r["top2_ttr"]), r["top2_url"],
+                r["top3_title"], r["top3_views"] or "", _ttr_pct(r["top3_ttr"]), r["top3_url"],
             ])
     return path
 
@@ -195,18 +227,22 @@ def write_articles_csv(
         w = csv.writer(f)
         w.writerow([
             "Ранг", "Заголовок", "Лид (первый абзац)",
-            "Просмотры", "Дочитывания", "Дочитываемость (доля)",
+            "Просмотры", "Дочитывания", "Дочитываемость, %",
             "Время чтения (сек)",
             "Дата публикации", "Дней назад", "В окне 30 дней",
             "Релевантность канала", "Название канала", "Ссылка на канал", "Подписчиков канала",
             "Ссылка на статью",
         ])
+
+        def _ttr_pct(v):
+            return f"{round(v * 100, 1)}%" if v is not None else ""
+
         for i, r in enumerate(rows, 1):
             w.writerow([
                 i, r["title"], (r["lead"] or "")[:800],
                 r["views"] if r["views"] is not None else "",
                 r["views_till_end"] if r["views_till_end"] is not None else "",
-                round(r["ttr_rate"], 3) if r["ttr_rate"] is not None else "",
+                _ttr_pct(r["ttr_rate"]),
                 r["ttr_sec"] if r["ttr_sec"] is not None else "",
                 r["pub_date"], r["days_ago"] if r["days_ago"] is not None else "",
                 r["in_30d"],

@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -48,36 +49,79 @@ class AIClient:
     def remaining(self) -> float:
         return max(self.budget - self.spent, 0.0)
 
-    async def _call(self, system: str, user: str, *, max_tokens: int = 2000) -> AIResult:
+    async def _call(self, system: str, user: str, *, max_tokens: int = 2000,
+                    retries: int = 3) -> AIResult:
         if self.remaining <= 0:
             raise AIBudgetExceeded(f"Бюджет AI исчерпан: ${self.spent:.4f} >= ${self.budget}")
-        async with httpx.AsyncClient(timeout=60) as cli:
-            r = await cli.post(
-                OPENROUTER_URL,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "max_tokens": max_tokens,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                },
-            )
-        if r.status_code != 200:
-            raise RuntimeError(f"OpenRouter вернул HTTP {r.status_code}: {r.text[:200]}")
-        data = r.json()
-        usage = data.get("usage", {})
-        in_tok = usage.get("prompt_tokens", 0)
-        out_tok = usage.get("completion_tokens", 0)
-        # OpenRouter возвращает точную стоимость в usage.cost
-        cost_local = float(usage.get("cost") or 0)
-        self.spent += cost_local
-        text = data["choices"][0]["message"]["content"]
-        return AIResult(text=text, cost=cost_local)
+
+        # GPT-5/o-series тратят токены на reasoning. Если max_tokens слишком мал,
+        # content вернётся пустым. Для них утраиваем лимит.
+        is_reasoning = (
+            self.model.startswith("openai/gpt-5") or
+            self.model.startswith("openai/o") or
+            "reasoning" in self.model
+        )
+        effective_max = max_tokens * 3 if is_reasoning else max_tokens
+
+        last_err: Optional[str] = None
+        for attempt in range(retries):
+            try:
+                async with httpx.AsyncClient(timeout=120) as cli:
+                    r = await cli.post(
+                        OPENROUTER_URL,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self.model,
+                            "max_tokens": effective_max,
+                            "messages": [
+                                {"role": "system", "content": system},
+                                {"role": "user", "content": user},
+                            ],
+                        },
+                    )
+                if r.status_code in (401, 403):
+                    # Сразу падаем — повторы бессмысленны.
+                    raise RuntimeError(
+                        f"OpenRouter отверг ключ (HTTP {r.status_code}). "
+                        f"Проверь его на openrouter.ai/keys или пополни баланс."
+                    )
+                if r.status_code in (429, 500, 502, 503, 504):
+                    last_err = f"HTTP {r.status_code}"
+                    if attempt < retries - 1:
+                        wait = 2 ** attempt
+                        logger.warning("OpenRouter %d, ждём %ds", r.status_code, wait)
+                        await asyncio.sleep(wait)
+                        continue
+                    raise RuntimeError(f"OpenRouter недоступен после {retries} попыток: {last_err}")
+                if r.status_code != 200:
+                    raise RuntimeError(f"OpenRouter HTTP {r.status_code}: {r.text[:200]}")
+                try:
+                    data = r.json()
+                except (ValueError, json.JSONDecodeError) as e:
+                    raise RuntimeError(f"OpenRouter не-JSON ответ: {e}") from e
+                usage = data.get("usage", {})
+                cost_local = float(usage.get("cost") or 0)
+                self.spent += cost_local
+                choices = data.get("choices") or []
+                if not choices:
+                    raise RuntimeError("OpenRouter вернул пустой choices")
+                msg = choices[0].get("message") or {}
+                text = msg.get("content") or ""
+                # Reasoning-модели иногда отдают только reasoning, без content (если max_tokens мал).
+                if not text:
+                    text = msg.get("reasoning") or msg.get("reasoning_content") or ""
+                if not text:
+                    raise RuntimeError(f"Пустой ответ от {self.model} (увеличь max_tokens?)")
+                return AIResult(text=text, cost=cost_local)
+            except (httpx.HTTPError, asyncio.TimeoutError) as e:
+                last_err = repr(e)
+                if attempt < retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise RuntimeError(f"OpenRouter сеть недоступна: {last_err}")
 
     @staticmethod
     def _extract_json(text: str):
@@ -104,21 +148,68 @@ class AIClient:
 
     async def expand_niche(self, niche: str, description: str = "", *, n: int = 25) -> list[str]:
         """По нише + описанию возвращает n поисковых запросов для Дзена."""
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        current_year = datetime.now().year
         system = (
-            "Ты помогаешь искать конкурентов в Яндекс.Дзене. "
-            "На вход — ниша и опционально описание. "
-            "Сгенерируй разнообразные русскоязычные поисковые запросы, по которым в Дзене "
-            "найдутся каналы и статьи именно по этой нише. Запросы должны покрывать разные "
-            "подтемы и углы зрения. Без воды, без объяснений. Только список JSON-массивом."
+            "Ты — стратег по контент-маркетингу, который помогает находить конкурентов "
+            "в Яндекс.Дзене для конкретного бизнеса. Твоя задача — сгенерировать "
+            f"{n} разнообразных поисковых запросов, по которым в Дзене найдутся "
+            "именно те каналы, которые являются настоящими конкурентами этого бизнеса.\n\n"
+
+            "ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:\n"
+            "1. ЯЗЫК. Только русский. Никаких англицизмов и калек («флипинг», «сторителлинг», "
+            "«нетворкинг», «инсайдер», «маркетплейс»). Если такое слово используют сами носители "
+            "ниши — допустимо, но проверь себя на здравый смысл.\n"
+            "2. ЕСТЕСТВЕННОСТЬ. Запросы должны выглядеть так, как реальный человек печатает в "
+            "поисковой строке Яндекса. Короткие фразы 2–5 слов лучше длинных «риск-менеджмент в "
+            "недвижимости». Не используй академические/корпоративные обороты.\n"
+            f"3. ГОД. Если ставишь год в запрос — только {current_year} (текущий). Чаще всего "
+            "год не нужен совсем.\n"
+            "4. ТОЧНОСТЬ ПОПАДАНИЯ. Каждый запрос должен с большой вероятностью вернуть "
+            "именно конкурентов этого бизнеса, а не аудиторию его клиентов и не другую "
+            "тему. Если бизнес «бренд женской одежды на маркетплейсе» — конкуренты это другие "
+            "бренды и retail-эксперты, а НЕ fashion-блогеры для покупательниц. Если бизнес "
+            "«частный психиатр с медобразованием» — конкуренты это другие врачи-психотерапевты "
+            "(не коучи и не тарологи). Думай: «Если человек ищет ИМЕННО таких как этот бизнес, "
+            "что он печатает?»\n"
+            "5. ГЕОГРАФИЯ. Если в описании указан город или регион — добавляй его в "
+            "часть запросов («юрист по ЖКХ Москва», «риэлтор Краснодар»). Не добавляй в каждый — "
+            "только там, где это реально сужает поиск.\n"
+            "6. УГОЛ ЗРЕНИЯ. Покрывай разные подтемы: услуги, обучение, обзоры, проблемы клиентов, "
+            "сравнения, юридические/налоговые/финансовые аспекты, отраслевая аналитика. Не делай "
+            "25 однотипных вариаций одной фразы.\n"
+            "7. БЕЗ КЛИКБЕЙТА И ЭЗОТЕРИКИ. Не генерируй «секреты», «как заработать миллион», "
+            "«мистическая правда». Это привлечёт мусорные каналы.\n"
+            "8. ИЗБЕГАЙ ОБЩИХ СЛОВ. Запрос «инвестиции» или «бизнес» вернёт огромный пул общих "
+            "блогеров, среди которых конкурентов почти не будет. Уточняй: «инвестиции в "
+            "коммерческую недвижимость», «бизнес в строительстве».\n\n"
+
+            "ФОРМАТ ОТВЕТА: только JSON-массив строк, без markdown-обёрток, без объяснений."
         )
-        user = f"Ниша: {niche}\n"
+        user = (
+            f"Сегодняшняя дата: {today}\n"
+            f"Ниша / бизнес: {niche}\n"
+        )
         if description.strip():
-            user += f"Описание: {description.strip()}\n"
-        user += f"Сгенерируй {n} запросов в формате JSON-массива строк. Без markdown-обёрток."
+            user += f"Контекст бизнеса от пользователя: {description.strip()}\n"
+        else:
+            user += (
+                "Контекст не указан. Будь особенно осторожен: без контекста легко "
+                "сгенерировать слишком общие запросы. Делай конкретно по слову ниши.\n"
+            )
+        user += (
+            f"\nСгенерируй ровно {n} поисковых запросов. "
+            "Каждый запрос — короткая русская фраза 2–5 слов. "
+            "Только JSON-массив строк."
+        )
         try:
             res = await self._call(system, user, max_tokens=1200)
         except AIBudgetExceeded:
             logger.warning("AI budget исчерпан до expand_niche")
+            return []
+        except RuntimeError as e:
+            logger.error("AI ошибка: %s", e)
             return []
         try:
             arr = self._extract_json(res.text)
@@ -152,14 +243,40 @@ class AIClient:
             return results
 
         system = (
-            "Ты эксперт по контенту. Тебе дают нишу, описание ниши и список каналов "
-            "(название, описание, топовые заголовки). Для КАЖДОГО канала оцени релевантность "
-            "нише по шкале 0–10 и выдай категорию: профильный | смежный | нерелевантный.\n"
-            "Профильный — канал про эту нишу как основную тему.\n"
-            "Смежный — частично затрагивает, но основная тема другая.\n"
-            "Нерелевантный — не про эту нишу.\n"
-            "Учитывай конкретику описания пользователя: если он не хочет лайфстайл-каналы, "
-            "снижай оценку и помечай как нерелевантный, даже если ключевые слова есть."
+            "Ты — стратег конкурентного анализа. Тебе дают конкретный бизнес "
+            "(нишу + описание) и список Дзен-каналов с их названиями, описаниями и топовыми "
+            "заголовками. Для КАЖДОГО канала строго оцени, насколько он реально является "
+            "конкурентом ИМЕННО этого бизнеса.\n\n"
+
+            "ШКАЛА: relevance 0–10.\n"
+            "  9–10 — прямой конкурент: тот же продукт/услуга для той же аудитории.\n"
+            "  6–8  — близкий по тематике, но другой угол / сегмент / уровень.\n"
+            "  3–5  — смежная тема, может быть для коллабораций, но не конкурент.\n"
+            "  1–2  — формально пересекаются ключевые слова, но по сути не наш кейс.\n"
+            "  0    — не имеет отношения к нише.\n\n"
+
+            "КАТЕГОРИИ (ровно одна):\n"
+            "  «прямой конкурент» — продаёт/делает похожее на тот же сегмент аудитории.\n"
+            "  «смежный» — близкая отрасль или другой угол этой же ниши.\n"
+            "  «аудитория» — пишет ДЛЯ потенциальных клиентов нашего бизнеса, а не конкурирует.\n"
+            "  «нерелевантный» — не про эту нишу совсем.\n\n"
+
+            "ЖЁСТКИЕ ПРАВИЛА:\n"
+            "1. Различай «контент про X» и «бизнес продающий X». Канал «как одеваться "
+            "стильно» — это аудитория для бренда одежды, а не конкурент бренда.\n"
+            "2. Если бизнес узкоспециализированный (медицинский психиатр, элитная юр-практика, "
+            "B2B-сервис) — общие каналы по теме ставь не выше 4. Прямой конкурент — это "
+            "канал того же уровня экспертизы и сегмента рынка.\n"
+            "3. Учитывай ЯВНЫЕ исключения из описания пользователя. Если он написал «не хочу "
+            "лайфстайл», «не интересуют мам в декрете», «без эзотериков» — такие каналы получают "
+            "0–2 и категорию «нерелевантный», даже если ключевые слова есть.\n"
+            "4. Если в топовых заголовках видно кликбейт («вы не поверите», «секрет миллионеров», "
+            "«их жизнь после»), а в названии что-то экспертное — суди по реальному контенту, "
+            "то есть по заголовкам. Кликбейт-канал → не выше 3.\n"
+            "5. Если описание канала пустое и заголовков мало — будь консервативен. Лучше "
+            "поставить ниже, чем выше: пользователь сам пересмотрит, если ошиблись в минус.\n"
+            "6. «reason» — одно короткое предложение: что именно совпадает / не совпадает с нишей. "
+            "Не лей воду. Не пересказывай заголовки.\n"
         )
 
         for i in range(0, len(channels), batch_size):
@@ -176,12 +293,14 @@ class AIClient:
                     "top_titles": (c.get("top_titles") or [])[:5],
                 })
             user = (
-                f"Ниша: {niche}\n"
-                f"Описание ниши пользователя: {description.strip() or '(не указано)'}\n\n"
-                f"Каналы:\n{json.dumps(payload_lines, ensure_ascii=False)}\n\n"
-                "Ответь JSON-массивом объектов: "
-                '[{"slug":"...","relevance":0-10,"category":"профильный|смежный|нерелевантный","reason":"короткая причина"}]. '
-                "Только JSON, без markdown."
+                f"Ниша / бизнес: {niche}\n"
+                f"Описание от пользователя: {description.strip() or '(не указано)'}\n\n"
+                f"Каналы для оценки:\n{json.dumps(payload_lines, ensure_ascii=False)}\n\n"
+                "Ответь JSON-массивом объектов вида:\n"
+                '[{"slug":"...","relevance":0-10,'
+                '"category":"прямой конкурент|смежный|аудитория|нерелевантный",'
+                '"reason":"одно короткое предложение"}]\n'
+                "Только JSON, без markdown-обёрток, без преамбулы."
             )
             try:
                 res = await self._call(system, user, max_tokens=4000)

@@ -1,18 +1,15 @@
 """Entry point десктопного приложения «Дзен · Конкуренты».
 
-Запускает локальный FastAPI-сервер, открывает браузер на главную страницу,
-держится до Ctrl+C или закрытия окна терминала. На сборке через PyInstaller
-получим .app/.exe/AppImage с встроенным Chromium и Python.
+Поднимает локальный FastAPI-сервер в фоне и открывает нативное окно через pywebview
+(на Mac — Cocoa WKWebView, на Windows — Edge WebView2, на Linux — GTK WebKit).
+Никаких вкладок в системном браузере. Закрытие окна = выход из приложения.
 """
 from __future__ import annotations
 
-import os
-import signal
 import socket
 import sys
 import threading
 import time
-import webbrowser
 from pathlib import Path
 
 
@@ -68,47 +65,32 @@ def main() -> int:
     port = _free_port()
     url = f"http://127.0.0.1:{port}/"
 
-    # Сервер в фоне, browser в основном
-    t = threading.Thread(
+    # Сервер в daemon-потоке, чтобы он умер вместе с процессом окна
+    threading.Thread(
         target=run_server,
         kwargs={"host": "127.0.0.1", "port": port},
         daemon=True,
-    )
-    t.start()
+    ).start()
 
     if not _wait_server_ready(port):
         print("[!] Сервер не стартанул за 20 секунд", file=sys.stderr)
         return 1
 
-    # Дружелюбный баннер в консоль (виден только если запустить из терминала)
-    banner = f"""
-╔═══════════════════════════════════════════════╗
-║  Дзен · Конкуренты                            ║
-║                                               ║
-║  Открыто: {url:<35} ║
-║                                               ║
-║  Закрой это окно или нажми Ctrl+C, чтобы      ║
-║  выйти. CSV-отчёты — в папке data/.           ║
-╚═══════════════════════════════════════════════╝
-"""
-    print(banner)
-    webbrowser.open(url)
+    # Открываем нативное окно
+    import webview
 
-    # Ждём сигнала о выходе
-    stop_event = threading.Event()
-
-    def _on_signal(*_):
-        print("\nЗавершаю работу…")
-        stop_event.set()
-
-    signal.signal(signal.SIGINT, _on_signal)
-    signal.signal(signal.SIGTERM, _on_signal)
-
-    try:
-        while not stop_event.is_set():
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        pass
+    webview.create_window(
+        title="Дзен · Конкуренты",
+        url=url,
+        width=1280,
+        height=860,
+        min_size=(960, 700),
+        background_color="#0A0B10",
+        resizable=True,
+        confirm_close=False,
+    )
+    # Блокирующий вызов — выходит когда пользователь закрывает окно
+    webview.start()
     return 0
 
 

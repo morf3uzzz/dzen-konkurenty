@@ -71,12 +71,16 @@ class Storage:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._conn() as c:
+        # Один раз включаем WAL — даёт concurrent reads/writes без блокировок.
+        with sqlite3.connect(db_path) as c:
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute("PRAGMA synchronous=NORMAL")
             c.executescript(SCHEMA)
 
     @contextmanager
     def _conn(self):
-        conn = sqlite3.connect(self.db_path)
+        # timeout=10s — если другой воркер пишет, ждём вместо OperationalError
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             yield conn

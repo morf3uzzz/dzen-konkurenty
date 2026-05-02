@@ -16,6 +16,9 @@
   <div class="bg-blob b2"></div>
 </div>
 
+<!-- Контейнер для toast-плашек -->
+<div class="toast-container" id="toasts"></div>
+
 <header class="topbar">
   <div class="brand">
     <span class="brand-mark"></span>
@@ -25,6 +28,7 @@
     <span class="eye-pill hidden" id="ai-cost-pill">
       <span class="dot"></span>
       <span id="ai-cost-text">AI · $0.0000</span>
+      <span class="cost-bar" id="ai-cost-bar"></span>
     </span>
   </div>
 </header>
@@ -39,16 +43,16 @@
       <div class="card-head">
         <div class="eyebrow">Настройка прогона</div>
         <h2>Запусти анализ</h2>
-        <span class="card-sub">AI расширит нишу, скрипт соберёт каналы из трёх источников и оценит каждый на релевантность</span>
+        <span class="card-sub">AI расширит нишу, скрипт соберёт каналы из трёх источников и оценит каждый на релевантность. Прогон занимает ~15–30 минут, AI стоит ~$0.10–0.20.</span>
       </div>
 
       <label class="field">
-        <span class="label">OpenRouter API ключ</span>
+        <span class="label">OpenRouter API ключ <span class="muted">— чтобы AI расширил нишу и оценил каналы</span></span>
         <div class="input-group">
           <input id="api_key" type="password" placeholder="sk-or-v1-..." autocomplete="off" spellcheck="false">
           <button id="load_models" class="btn-icon-only" type="button" title="Подгрузить модели">↻</button>
         </div>
-        <span class="hint">Не сохраняется на сервере. Получить: <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a></span>
+        <span class="hint">Не сохраняется на сервере. Зарегистрируйся на <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>, пополни баланс на $5–10. После ввода ключа нажми ↻ чтобы загрузить модели.</span>
       </label>
 
       <label class="field">
@@ -67,7 +71,7 @@
       </label>
 
       <label class="field">
-        <span class="label">Описание ниши <span class="muted">— что ищем, что отсеиваем</span></span>
+        <span class="label">Описание ниши <span class="muted">— что ищем, что отсеиваем</span> <button type="button" class="link-btn" id="load_example">вставить пример</button></span>
         <textarea id="description" rows="5" placeholder="Опиши: для кого контент, какие подтемы интересны и какие — нет.&#10;&#10;Пример: Рынок недвижимости в России для инвесторов и риэлторов. Интересны каналы про сделки, ипотеку, аналитику рынка. Не интересны дизайн интерьеров, ремонт и личные истории мам в декрете."></textarea>
         <span class="hint">Чем подробнее — тем точнее AI отсеет нерелевантные каналы.</span>
       </label>
@@ -75,7 +79,7 @@
       <label class="field field-narrow">
         <span class="label">Минимум подписчиков</span>
         <input id="min_subs" type="number" min="0" value="1000" autocomplete="off">
-        <span class="hint">Меньшие — не идут в детальный анализ и в финальный CSV.</span>
+        <span class="hint" id="min_subs_hint">Меньшие — не идут в детальный анализ и в финальный CSV. При <b>1000</b> прогон ~20 мин. При <b>0</b> ≈ 1 час.</span>
       </label>
 
       <div class="actions">
@@ -94,27 +98,34 @@
   <div class="col col-right">
 
     <!-- Card: История -->
-    <section class="card">
+    <section class="card" id="history_card">
       <div class="card-head">
-        <div class="eyebrow">Только твоё</div>
+        <div class="eyebrow">Прошлые прогоны</div>
         <h2>История</h2>
-        <span class="card-sub">Файлы видны только тебе. Удаляются с сервера через 24 часа.</span>
+        <span class="card-sub">CSV хранятся локально в папке <code>data/</code> рядом с приложением.</span>
       </div>
+
+      <!-- Навигация: одна карточка + стрелки -->
+      <div class="history-nav hidden" id="history_nav">
+        <button class="history-arrow" id="hist_prev" title="Предыдущий прогон">←</button>
+        <span class="history-counter" id="hist_counter">1 / 1</span>
+        <button class="history-arrow" id="hist_next" title="Следующий прогон">→</button>
+      </div>
+
       <div id="reports" class="reports">
         <div class="empty">пока нет прогонов</div>
       </div>
     </section>
 
-    <!-- Card: Как работает -->
+    <!-- Card: Под капотом -->
     <section class="card">
       <div class="card-head">
         <div class="eyebrow">Под капотом</div>
-        <h2>6 стадий</h2>
+        <h2>5 стадий</h2>
       </div>
       <ol class="steps">
         <li>AI расширяет нишу в десятки тематических запросов</li>
         <li>Скрипт идёт в Дзен через два вида поиска</li>
-        <li>Дополняет сеть похожими каналами</li>
         <li>Отсеивает мелочь по фильтру подписчиков</li>
         <li>Тянет статьи и метрики через JSON-API</li>
         <li>AI оценивает каждый канал на релевантность</li>
@@ -122,11 +133,9 @@
     </section>
 
   </div>
-</main>
 
-<!-- Прогресс + лог: полная ширина -->
-<section class="full-width">
-  <div class="card">
+  <!-- Прогресс — на обе колонки, прижат снизу -->
+  <section class="card progress-card">
     <div class="card-head">
       <div class="eyebrow">Что происходит</div>
       <h2>Прогресс</h2>
@@ -136,17 +145,86 @@
     <div class="progress-wrap" id="progress">
       <div class="progress-stage" data-stage="1"><span class="progress-label">Расширение</span></div>
       <div class="progress-stage" data-stage="2"><span class="progress-label">Сбор каналов</span></div>
-      <div class="progress-stage" data-stage="3"><span class="progress-label">Похожие</span></div>
-      <div class="progress-stage" data-stage="4"><span class="progress-label">Отсев</span></div>
-      <div class="progress-stage" data-stage="5"><span class="progress-label">Метрики</span></div>
-      <div class="progress-stage" data-stage="6"><span class="progress-label">AI оценка</span></div>
+      <div class="progress-stage" data-stage="3"><span class="progress-label">Отсев</span></div>
+      <div class="progress-stage" data-stage="4"><span class="progress-label">Метрики</span></div>
+      <div class="progress-stage" data-stage="5"><span class="progress-label">AI оценка</span></div>
     </div>
 
     <div class="log-wrap">
       <pre id="log" class="log">Ожидание запуска…</pre>
     </div>
+
+    <div class="stall-warning hidden" id="stall_warning"></div>
+
+    <!-- Финальный «триумф» — показывается после готово -->
+    <div class="finish-panel hidden" id="finish_panel">
+      <div class="finish-headline">
+        <div class="finish-eyebrow">Готово</div>
+        <h3 class="finish-niche" id="finish_niche">—</h3>
+      </div>
+
+      <div class="finish-grid" id="finish_grid">
+        <div class="finish-stat" data-key="channels">
+          <div class="finish-stat-num" data-target="0">0</div>
+          <div class="finish-stat-label">каналов</div>
+        </div>
+        <div class="finish-stat" data-key="articles">
+          <div class="finish-stat-num" data-target="0">0</div>
+          <div class="finish-stat-label">статей</div>
+        </div>
+        <div class="finish-stat" data-key="profile">
+          <div class="finish-stat-num" data-target="0">0</div>
+          <div class="finish-stat-label">профильных</div>
+        </div>
+        <div class="finish-stat" data-key="avg_subs">
+          <div class="finish-stat-num" data-target="0">0</div>
+          <div class="finish-stat-label">ср. подписчиков</div>
+        </div>
+      </div>
+
+      <div class="finish-top" id="finish_top"></div>
+
+      <div class="finish-actions">
+        <button class="btn btn-primary" id="show_preview">📊 Показать топ-30</button>
+        <button class="btn btn-ghost" id="save_articles">📄 Сохранить статьи</button>
+        <button class="btn btn-ghost" id="save_channels">📋 Сохранить каналы</button>
+        <button class="btn btn-ghost" id="open_folder">📁 Папка</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Modal: Топ-30 превью -->
+<div class="modal hidden" id="preview_modal">
+  <div class="modal-backdrop" id="preview_backdrop"></div>
+  <div class="modal-window">
+    <div class="modal-head">
+      <div>
+        <div class="eyebrow">Превью результата</div>
+        <h2 id="preview_title">Топ-30 каналов</h2>
+      </div>
+      <button class="modal-close" id="preview_close">✕</button>
+    </div>
+    <div class="modal-body">
+      <table class="preview-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Канал</th>
+            <th>Подп.</th>
+            <th>Рел.</th>
+            <th>Категория</th>
+            <th>Стат. 30д</th>
+            <th>Мед. просм.</th>
+            <th>Дочит.</th>
+            <th>Топ-1 статья</th>
+          </tr>
+        </thead>
+        <tbody id="preview_tbody"><tr><td colspan="9">Загрузка…</td></tr></tbody>
+      </table>
+    </div>
   </div>
-</section>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

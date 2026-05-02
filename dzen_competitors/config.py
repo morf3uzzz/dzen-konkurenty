@@ -7,7 +7,8 @@ import yaml
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
-load_dotenv(ROOT / ".env")
+# override=False: реальная переменная окружения (от родительского процесса) важнее .env-файла
+load_dotenv(ROOT / ".env", override=False)
 
 
 def _env_float(key: str, default: float) -> float:
@@ -29,8 +30,9 @@ def _env_bool(key: str, default: bool) -> bool:
 
 @dataclass
 class Config:
-    # Браузер для поиска каналов (Playwright)
-    headless: bool = _env_bool("HEADLESS", False)
+    # Браузер для поиска каналов (Playwright). По умолчанию скрыт — приложение
+    # не должно мигать окнами Chromium для пользователя.
+    headless: bool = _env_bool("HEADLESS", True)
     browser_timeout: int = _env_int("BROWSER_TIMEOUT", 60000)
 
     min_delay: float = _env_float("MIN_DELAY", 1.0)
