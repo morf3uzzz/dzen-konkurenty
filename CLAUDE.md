@@ -185,38 +185,82 @@ git push origin v1.0.0
 
 GitHub Actions сама соберёт и положит файлы в Releases.
 
-### Логика выбора «локально vs Actions» (правило)
+### Логика сборки 4 платформ — проверенный рецепт
 
-**По умолчанию все 4 сборки идут через GitHub Actions** (`.github/workflows/build.yml`,
-матрица: `macos-14` arm64 + `macos-13` intel + `windows-latest` + `ubuntu-latest`).
-Это правильный путь — нативные runner'ы, чистое окружение, без Rosetta-фокусов.
+GitHub Actions matrix теоретически собирает всё, **но `macos-13` (Intel) runner
+у GitHub фактически не приходит** — job висит в очереди и в итоге получаем
+таймаут. Поэтому Intel-сборку делаем **локально через Rosetta** и заливаем в
+тот же Release вручную.
 
-**Локально имеет смысл собирать только под архитектуру текущей машины:**
-- Apple Silicon (`uname -m` → `arm64`) → локально только arm64 .app.
-- Intel Mac → локально только Intel .app.
-- Windows / Linux — аналогично.
+**Стандартный workflow на релиз (v1.0.0 → v1.0.1 → ...):**
 
-**Кросс-сборка под чужую архитектуру локально — плохая идея.** Например, на arm64
-Mac собрать Intel .app можно через `arch -x86_64` + Rosetta + Intel-Python +
-universal2/x86_64 wheel'ы (особенно Playwright). Это шатко: half wheel'ов нет в
-x86_64, идёт компиляция из исходников, Chromium качается отдельно. Если уж очень
-надо — пользователь явно попросил, и тогда:
-1. Установить Intel-Python: `arch -x86_64 /usr/bin/env brew install python@3.12`
-   или скачать с python.org x86_64 installer.
-2. Создать отдельный `.venv-intel` с этим Python.
-3. `arch -x86_64 .venv-intel/bin/python -m pip install -r requirements.txt`.
-4. `arch -x86_64 .venv-intel/bin/python -m playwright install chromium`.
-5. `arch -x86_64 .venv-intel/bin/python -m PyInstaller build/dzen.spec`.
+```bash
+# 1. Тэг → Actions соберёт arm64-macOS + Windows + Linux
+git tag vX.Y.Z && git push origin vX.Y.Z
 
-Гораздо проще запушить тег и подождать 15-20 минут — Actions выдаст все 4 артефакта
-и автоматически создаст релиз.
+# 2. Скачать готовые артефакты (run-id из gh run list)
+mkdir -p dist-release && cd dist-release
+gh run download <run-id> -n macos-arm64 -n windows-x64 -n linux-x64
+cd ..
 
-**Если пользователь просит «собрать одну платформу локально, а остальное через CI»** —
-делать это надо так: собрать локально, **отдельно** загрузить артефакт в существующий
-GitHub Release (`gh release upload v1.0.0 path/to/file.dmg`), параллельно запустить
-Actions для остальных платформ через тот же тег. Не убирать платформу из матрицы
-workflow — Actions всё равно соберёт, и это не помешает (или, если хочется
-сэкономить минуты CI, использовать `workflow_dispatch` и явно выбрать платформы).
+# 3. Собрать Intel локально (рецепт ниже)
+
+# 4. Создать Release со всеми 4 артефактами
+gh release create vX.Y.Z \
+  dist-release/macos-arm64/DzenKonkurenty-mac-arm64.dmg \
+  dist/DzenKonkurenty-mac-intel.dmg \
+  dist-release/windows-x64/DzenKonkurenty-win-x64.zip \
+  dist-release/linux-x64/DzenKonkurenty-linux-x64.tar.gz \
+  --title "vX.Y.Z" --notes "..."
+```
+
+**Локальная Intel-сборка на arm64 Mac (РАБОТАЕТ, проверено для v1.0.1):**
+
+Ключевой нюанс — Playwright Node-driver под Rosetta всё равно детектит host CPU
+через `os.cpus()[].model.includes("Apple")` и качает arm64 Chromium. Обходится
+через `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=mac15`.
+
+```bash
+# 1. Intel venv (universal2 Python из python.org или /usr/local/bin/python3)
+arch -x86_64 /usr/local/bin/python3 -m venv .venv-intel
+arch -x86_64 .venv-intel/bin/python -m pip install --upgrade pip
+arch -x86_64 .venv-intel/bin/python -m pip install -r requirements.txt pyinstaller
+
+# 2. x86_64 Chromium (override обязателен!)
+PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=mac15 \
+PLAYWRIGHT_BROWSERS_PATH="$PWD/.pw-intel" \
+arch -x86_64 .venv-intel/bin/python -m playwright install chromium
+
+# 3. Сборка .app (PyInstaller под Rosetta даст x86_64 binary)
+PYTHONOPTIMIZE=1 arch -x86_64 .venv-intel/bin/python \
+  -m PyInstaller build/dzen.spec --clean --noconfirm
+
+# 4. Затащить Chromium в .app
+mkdir -p "dist/DzenKonkurenty.app/Contents/Resources/playwright-browsers"
+cp -R .pw-intel/. "dist/DzenKonkurenty.app/Contents/Resources/playwright-browsers/"
+
+# 5. .dmg
+hdiutil create -volname "Дзен Конкуренты" \
+  -srcfolder "dist/DzenKonkurenty.app" \
+  -ov -format UDZO "dist/DzenKonkurenty-mac-intel.dmg"
+
+# 6. Проверка x86_64 (КРИТИЧЕСКИ ВАЖНО — иначе на Intel-Маке упадёт)
+file "dist/DzenKonkurenty.app/Contents/MacOS/DzenKonkurenty"
+# должно быть: Mach-O 64-bit executable x86_64
+file "dist/DzenKonkurenty.app/Contents/Resources/playwright-browsers/chromium-1217/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+# тоже x86_64
+```
+
+**Подводные камни:**
+- Без `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=mac15` Playwright скачает arm64
+  Chromium даже под Rosetta. Симптом — папка `chrome-mac-arm64` вместо
+  `chrome-mac-x64`. На Intel-маке такая сборка упадёт с «Bad CPU type».
+- DMG-компрессия 743MB→356MB через UDZO требует ~1.5GB временно свободного
+  места. Если упрётся в `На устройстве нет больше места` — почистить
+  `~/Library/Caches/pip` (`pip cache purge`) и старые `chromium-NNNN` папки
+  в `~/Library/Caches/ms-playwright`.
+- `macos-13` в матрице workflow можно оставить — никому не мешает; runner
+  GitHub'а просто не приходит и job висит до отмены.
 
 ---
 
