@@ -323,7 +323,8 @@ async def last_report():
     # Если несколько прогонов попало — возьмём самый поздний по timestamp
     latest = sorted(groups.values(), key=lambda g: g["timestamp"], reverse=True)[0]
     if latest.get("channels"):
-        latest["stats"] = _quick_stats(DATA_DIR / latest["channels"]["name"])
+        articles_path = DATA_DIR / latest["articles"]["name"] if latest.get("articles") else None
+        latest["stats"] = _quick_stats(DATA_DIR / latest["channels"]["name"], articles_path)
     return {"report": latest}
 
 
@@ -349,12 +350,14 @@ async def reports():
     for g in groups.values():
         if not g["channels"]:
             continue
-        g["stats"] = _quick_stats(DATA_DIR / g["channels"]["name"])
+        articles_path = DATA_DIR / g["articles"]["name"] if g.get("articles") else None
+        g["stats"] = _quick_stats(DATA_DIR / g["channels"]["name"], articles_path)
     return {"reports": list(groups.values())}
 
 
-def _quick_stats(channels_csv: Path) -> Optional[dict]:
-    """Считает быструю статистику по CSV каналов: всего, средний размер, топ-канал."""
+def _quick_stats(channels_csv: Path, articles_csv: Optional[Path] = None) -> Optional[dict]:
+    """Считает быструю статистику по CSV каналов: всего, средний размер, топ-канал.
+    Если передан articles_csv — добавляет точное число статей (по строкам)."""
     try:
         import csv
         with open(channels_csv, encoding="utf-8-sig") as f:
@@ -365,13 +368,24 @@ def _quick_stats(channels_csv: Path) -> Optional[dict]:
         subs = [int(r.get("Подписчики") or 0) for r in rows if (r.get("Подписчики") or "").strip().isdigit()]
         avg = int(sum(subs) / len(subs)) if subs else 0
         top = rows[0].get("Название канала") or rows[0].get("Канал (slug)") or ""
-        # Релевантность: сколько профильных
-        prof = sum(1 for r in rows if (r.get("Категория") or "").strip() == "профильный")
+        # «Профильные» = прямые конкуренты. Учитываем и старое имя категории
+        # «профильный» (CSV до v1.0.2), и новое «прямой конкурент» (текущее).
+        DIRECT = {"профильный", "прямой конкурент"}
+        prof = sum(1 for r in rows if (r.get("Категория") or "").strip().lower() in DIRECT)
+        # Считаем статьи по реальным строкам, а не по размеру файла.
+        articles_total = None
+        if articles_csv and articles_csv.exists():
+            try:
+                with open(articles_csv, encoding="utf-8-sig") as af:
+                    articles_total = sum(1 for _ in csv.DictReader(af))
+            except Exception:
+                articles_total = None
         return {
             "total_channels": total,
             "avg_subscribers": avg,
             "top_channel": top[:60],
             "profile_count": prof,
+            "articles_total": articles_total,
         }
     except Exception:
         return None

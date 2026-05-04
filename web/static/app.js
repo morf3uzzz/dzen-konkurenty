@@ -172,9 +172,11 @@ async function showFinishPanel() {
       profile: s.profile_count || 0,
       avg_subs: s.avg_subscribers || 0,
     };
-    // articles: из CSV пустой файл = только BOM+заголовки (~700 байт),
-    // вычитаем header overhead, чтобы не показать «1 статья» при нуле.
-    if (latest.articles) {
+    // articles: предпочитаем точное число строк из stats (sever читает CSV).
+    // Фолбэк — оценка по размеру файла (если stats не пришли).
+    if (s.articles_total != null) {
+      targets.articles = s.articles_total;
+    } else if (latest.articles) {
       const HEADER_BYTES = 800;
       const PER_ROW = 700;
       const dataBytes = Math.max(0, latest.articles.size - HEADER_BYTES);
@@ -640,7 +642,7 @@ function _reportItemHtml(rep) {
     const fmtSubs = (n) => n >= 1000 ? `${(n/1000).toFixed(1)}K` : `${n}`;
     stats = `<div class="report-stats">
       <span>${s.total_channels} каналов</span>
-      ${s.profile_count ? `<span>· ${s.profile_count} профильных</span>` : ""}
+      ${s.profile_count ? `<span>· ${s.profile_count} прямых конкурентов</span>` : ""}
       ${s.avg_subscribers ? `<span>· ср. ${fmtSubs(s.avg_subscribers)} подп.</span>` : ""}
     </div>${s.top_channel ? `<div class="report-top">🏆 ${escapeHtml(s.top_channel)}</div>` : ""}`;
   }
