@@ -58,6 +58,11 @@ def write_channels_csv(
         if min_subs > 0 and (ch["subscribers"] or 0) < min_subs:
             continue
         arts = by_slug.get(slug, [])
+        # Отсекаем каналы без статей. Многие каналы в Дзене подвязаны к Telegram
+        # и публикуют только короткие посты (brief), а вкладка «Статьи» у них
+        # пустая. Для конкурентного анализа статей такие каналы не нужны.
+        if not arts:
+            continue
         views = [a["views"] for a in arts if a["views"] is not None]
         ttr = [a["views_till_end"] for a in arts if a["views_till_end"] is not None]
         # дочитываемость = sum(viewsTillEnd) / sum(views) — точнее, чем по статье
