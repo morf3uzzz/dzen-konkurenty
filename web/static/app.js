@@ -264,8 +264,19 @@ $("show_preview").addEventListener("click", () => openPreview());
 $("preview_close").addEventListener("click", () => closePreview());
 $("preview_backdrop").addEventListener("click", () => closePreview());
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closePreview();
+  if (e.key === "Escape") {
+    closePreview();
+    closeHelp();
+  }
 });
+
+// Справка по таблицам — кнопка в правой колонке + в финал-панели
+function openHelp() { $("help_modal").classList.remove("hidden"); }
+function closeHelp() { $("help_modal").classList.add("hidden"); }
+$("show_help")?.addEventListener("click", openHelp);
+$("show_help_finish")?.addEventListener("click", openHelp);
+$("help_close")?.addEventListener("click", closeHelp);
+$("help_backdrop")?.addEventListener("click", closeHelp);
 
 async function openPreview() {
   if (!lastReports || !lastReports.timestamp) return;
