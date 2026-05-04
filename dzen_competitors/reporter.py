@@ -63,6 +63,12 @@ def write_channels_csv(
         # пустая. Для конкурентного анализа статей такие каналы не нужны.
         if not arts:
             continue
+        # Отсекаем нерелевантные каналы. Если AI оценил релевантность —
+        # требуем минимум 5/10 (всё что ниже — формальное совпадение слов,
+        # мусор для конкурентного анализа). Если AI был выключен (нет ключа) —
+        # фильтр пропускаем, показываем все.
+        if ch["relevance"] is not None and ch["relevance"] < 5:
+            continue
         views = [a["views"] for a in arts if a["views"] is not None]
         ttr = [a["views_till_end"] for a in arts if a["views_till_end"] is not None]
         # дочитываемость = sum(viewsTillEnd) / sum(views) — точнее, чем по статье
@@ -188,11 +194,15 @@ def write_articles_csv(
     channels = {r["slug"]: r for r in storage.channels_by_slugs(slugs)}
     articles = storage.articles_for_channels(slugs, run_id)
 
-    # Список slug'ов прошедших фильтр.
-    if min_subs > 0:
-        allowed = {s for s, ch in channels.items() if (ch["subscribers"] or 0) >= min_subs}
-    else:
-        allowed = set(channels.keys())
+    # Список slug'ов прошедших фильтр (те же критерии, что в write_channels_csv:
+    # подписчики >= min_subs И релевантность >= 5, если AI её ставил).
+    def _passes(ch) -> bool:
+        if min_subs > 0 and (ch["subscribers"] or 0) < min_subs:
+            return False
+        if ch["relevance"] is not None and ch["relevance"] < 5:
+            return False
+        return True
+    allowed = {s for s, ch in channels.items() if _passes(ch)}
 
     rows: list[dict] = []
     for a in articles:
