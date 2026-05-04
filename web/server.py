@@ -33,16 +33,20 @@ from fastapi.staticfiles import StaticFiles
 def _resolve_paths():
     """Возвращает (CODE_ROOT, USER_ROOT).
     CODE_ROOT — где лежат dzen_competitors/web/ и т.п. (read-only, внутри бандла).
-    USER_ROOT — куда писать data/ и logs/ (рядом с .app/.exe, доступно пользователю).
+    USER_ROOT — куда писать data/ и logs/. Должно быть в писабельной для
+    пользователя директории И на видном месте (CSV — главный продукт).
     В dev оба совпадают — корень проекта."""
     if getattr(sys, "frozen", False):
         exec_dir = Path(sys.executable).resolve().parent
-        # macOS .app: код в Contents/Resources/, data/logs рядом с .app снаружи
+        # macOS .app: код в Contents/Resources/. Data — в ~/Documents/DzenKonkurenty,
+        # потому что родитель .app — это /Applications, туда писать нельзя
+        # (system protection) и не нужно (мусор в системной папке).
         if sys.platform == "darwin" and exec_dir.name == "MacOS" and exec_dir.parent.name == "Contents":
             code_root = exec_dir.parent / "Resources"
-            user_root = exec_dir.parent.parent.parent  # рядом с .app
+            user_root = Path.home() / "Documents" / "DzenKonkurenty"
             return code_root, user_root
-        # Win/Linux: всё рядом с launcher'ом
+        # Win/Linux: пишем рядом с launcher'ом — там пользователь сам выбрал куда
+        # распаковать (zip / tar.gz), значит писать туда безопасно и видимо.
         return exec_dir, exec_dir
     proj = Path(__file__).resolve().parent.parent
     return proj, proj
